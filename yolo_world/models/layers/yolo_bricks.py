@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 import torch.nn.functional as F
+from torch.profiler import record_function
 from mmcv.cnn import ConvModule, DepthwiseSeparableConvModule, Linear
 from mmdet.utils import ConfigType, OptConfigType, OptMultiConfig
 from mmengine.model import BaseModule
@@ -144,11 +145,16 @@ class MaxSigmoidCSPLayerWithTwoConv(CSPLayerWithTwoConv):
 
     def forward(self, x: Tensor, guide: Tensor) -> Tensor:
         """Forward process."""
-        x_main = self.main_conv(x)
+        with record_function("YW-predict-extract-neck-conv1"):
+            x_main = self.main_conv(x)
         x_main = list(x_main.split((self.mid_channels, self.mid_channels), 1))
-        x_main.extend(blocks(x_main[-1]) for blocks in self.blocks)
-        x_main.append(self.attn_block(x_main[-1], guide))
-        return self.final_conv(torch.cat(x_main, 1))
+        with record_function("YW-predict-extract-neck-block"):
+            x_main.extend(blocks(x_main[-1]) for blocks in self.blocks)
+        with record_function("YW-predict-extract-neck-attn"):
+            x_main.append(self.attn_block(x_main[-1], guide))
+        with record_function("YW-predict-extract-neck-conv2"):
+            result = self.final_conv(torch.cat(x_main, 1))
+        return result
 
 
 @MODELS.register_module()

@@ -3,6 +3,7 @@ import itertools
 from typing import List, Sequence, Tuple
 import torch
 from torch import Tensor
+from torch.profiler import record_function
 from torch.nn.modules.batchnorm import _BatchNorm
 from mmengine.model import BaseModule
 from mmyolo.registry import MODELS
@@ -211,9 +212,11 @@ class MultiModalYOLOBackbone(BaseModule):
 
     def forward(self, image: Tensor,
                 text: List[List[str]]) -> Tuple[Tuple[Tensor], Tensor]:
-        img_feats = self.image_model(image)
+        with record_function("YW-predict-extract-backbone-img"):
+            img_feats = self.image_model(image)
         if self.with_text_model:
-            txt_feats = self.text_model(text)
+            with record_function("YW-predict-extract-backbone-text"):
+                txt_feats = self.text_model(text)
             return img_feats, txt_feats
         else:
             return img_feats, None

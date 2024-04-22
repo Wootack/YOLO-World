@@ -5,6 +5,7 @@ import argparse
 import os.path as osp
 
 import torch
+from torch.profiler import profile, ProfilerActivity, schedule
 from mmengine.config import Config, DictAction
 from mmengine.runner import Runner
 from mmengine.runner.amp import autocast
@@ -82,7 +83,21 @@ def inference_detector(runner,
                       data_samples=[data_info['data_samples']])
 
     with autocast(enabled=use_amp), torch.no_grad():
-        output = runner.model.test_step(data_batch)[0]
+
+        warmup = 10
+        active = 30
+        profile_schedule = schedule(wait=0, warmup=warmup, active=active, repeat=1)
+        def trace_handler(p):
+            output = p.key_averages()
+            output = output.table(sort_by="cpu_time")
+            with open("profile.txt", "a") as f:
+                f.write(output)
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], profile_memory=True, record_shapes=True, with_stack=True, schedule=profile_schedule, on_trace_ready=trace_handler) as prof:
+            for _ in range(warmup+active):
+                output = runner.model.test_step(data_batch)[0]
+                prof.step()
+        prof.export_memory_timeline("memory.html", device="cuda:0")
+
         pred_instances = output.pred_instances
         pred_instances = pred_instances[pred_instances.scores.float() >
                                         score_thr]

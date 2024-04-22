@@ -3,6 +3,7 @@ from typing import List, Tuple, Union
 import torch
 import torch.nn as nn
 from torch import Tensor
+from torch.profiler import record_function
 from mmdet.structures import OptSampleList, SampleList
 from mmyolo.models.detectors import YOLODetector
 from mmyolo.registry import MODELS
@@ -40,18 +41,21 @@ class YOLOWorldDetector(YOLODetector):
         processing.
         """
 
-        img_feats, txt_feats = self.extract_feat(batch_inputs,
-                                                 batch_data_samples)
+        with record_function("YW-predict-extract"):
+            img_feats, txt_feats = self.extract_feat(batch_inputs,
+                                                     batch_data_samples)
 
         # self.bbox_head.num_classes = self.num_test_classes
         self.bbox_head.num_classes = txt_feats[0].shape[0]
-        results_list = self.bbox_head.predict(img_feats,
-                                              txt_feats,
-                                              batch_data_samples,
-                                              rescale=rescale)
+        with record_function("YW-predict-bbox"):
+            results_list = self.bbox_head.predict(img_feats,
+                                                  txt_feats,
+                                                  batch_data_samples,
+                                                  rescale=rescale)
 
-        batch_data_samples = self.add_pred_to_datasample(
-            batch_data_samples, results_list)
+        with record_function("YW-predict-addpred"):
+            batch_data_samples = self.add_pred_to_datasample(
+                batch_data_samples, results_list)
         return batch_data_samples
 
     def reparameterize(self, texts: List[List[str]]) -> None:
@@ -92,10 +96,12 @@ class YOLOWorldDetector(YOLODetector):
             # forward image only
             img_feats = self.backbone.forward_image(batch_inputs)
         else:
-            img_feats, txt_feats = self.backbone(batch_inputs, texts)
+            with record_function("YW-predict-extract-backbone"):
+                img_feats, txt_feats = self.backbone(batch_inputs, texts)
         if self.with_neck:
             if self.mm_neck:
-                img_feats = self.neck(img_feats, txt_feats)
+                with record_function("YW-predict-extract-neck"):
+                    img_feats = self.neck(img_feats, txt_feats)
             else:
                 img_feats = self.neck(img_feats)
         return img_feats, txt_feats
