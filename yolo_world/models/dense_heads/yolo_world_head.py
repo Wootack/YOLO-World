@@ -3,6 +3,7 @@ import math
 import copy
 from typing import List, Optional, Tuple, Union, Sequence
 import torch
+from torch.profiler import record_function
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
@@ -234,9 +235,12 @@ class YOLOWorldHeadModule(YOLOv8HeadModule):
                        cls_contrast: nn.ModuleList) -> Tuple:
         """Forward feature of a single scale level."""
         b, _, h, w = img_feat.shape
-        cls_embed = cls_pred(img_feat)
-        cls_logit = cls_contrast(cls_embed, txt_feat)
-        bbox_dist_preds = reg_pred(img_feat)
+        with record_function("YW-predict-bbox-head-clspred"):
+            cls_embed = cls_pred(img_feat)
+        with record_function("YW-predict-bbox-head-contrast"):
+            cls_logit = cls_contrast(cls_embed, txt_feat)
+        with record_function("YW-predict-bbox-head-reg"):
+            bbox_dist_preds = reg_pred(img_feat)
         if self.reg_max > 1:
             bbox_dist_preds = bbox_dist_preds.reshape(
                 [-1, 4, self.reg_max, h * w]).permute(0, 3, 1, 2)
@@ -244,8 +248,9 @@ class YOLOWorldHeadModule(YOLOv8HeadModule):
             # TODO: The get_flops script cannot handle the situation of
             #  matmul, and needs to be fixed later
             # bbox_preds = bbox_dist_preds.softmax(3).matmul(self.proj)
-            bbox_preds = bbox_dist_preds.softmax(3).matmul(
-                self.proj.view([-1, 1])).squeeze(-1)
+            with record_function("YW-predict-bbox-head-matmul"):
+                bbox_preds = bbox_dist_preds.softmax(3).matmul(
+                    self.proj.view([-1, 1])).squeeze(-1)
             bbox_preds = bbox_preds.transpose(1, 2).reshape(b, -1, h, w)
         else:
             bbox_preds = bbox_dist_preds
@@ -320,10 +325,12 @@ class YOLOWorldHead(YOLOv8Head):
         batch_img_metas = [
             data_samples.metainfo for data_samples in batch_data_samples
         ]
-        outs = self(img_feats, txt_feats)
-        predictions = self.predict_by_feat(*outs,
-                                           batch_img_metas=batch_img_metas,
-                                           rescale=rescale)
+        with record_function("YW-predict-bbox-head"):
+            outs = self(img_feats, txt_feats)
+        with record_function("YW-predict-bbox-boxhead"):
+            predictions = self.predict_by_feat(*outs,
+                                               batch_img_metas=batch_img_metas,
+                                               rescale=rescale)
         return predictions
 
     def aug_test(self,

@@ -73,6 +73,7 @@ def inference_detector(runner,
                        texts,
                        max_dets,
                        score_thr,
+                       args,
                        output_dir,
                        use_amp=False,
                        show=False,
@@ -87,16 +88,19 @@ def inference_detector(runner,
         warmup = 10
         active = 30
         profile_schedule = schedule(wait=0, warmup=warmup, active=active, repeat=1)
+        model_size = os.path.basename(args.config).split('_')[3]
+        result_dir = os.path.join("results", model_size)
+        os.makedirs(result_dir, exist_ok=True)
         def trace_handler(p):
             output = p.key_averages()
             output = output.table(sort_by="cpu_time")
-            with open("profile.txt", "a") as f:
+            with open(os.path.join(result_dir, "profile.txt"), "a") as f:
                 f.write(output)
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], profile_memory=True, record_shapes=True, with_stack=True, schedule=profile_schedule, on_trace_ready=trace_handler) as prof:
             for _ in range(warmup+active):
                 output = runner.model.test_step(data_batch)[0]
                 prof.step()
-        prof.export_memory_timeline("memory.html", device="cuda:0")
+        prof.export_memory_timeline(os.path.join(result_dir, f"memory_{len(texts)-1}.html"), device=args.device)
 
         pred_instances = output.pred_instances
         pred_instances = pred_instances[pred_instances.scores.float() >
@@ -213,6 +217,7 @@ if __name__ == '__main__':
                            texts,
                            args.topk,
                            args.threshold,
+                           args,
                            output_dir=output_dir,
                            use_amp=args.amp,
                            show=args.show,
